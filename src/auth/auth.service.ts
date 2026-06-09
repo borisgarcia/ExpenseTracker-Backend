@@ -22,11 +22,11 @@ export class AuthService {
       });
       const payload = ticket.getPayload();
       if (!payload) {
-        throw new UnauthorizedException('Token de Google inválido');
+        throw new UnauthorizedException('Invalid Google token');
       }
       return payload;
     } catch (error) {
-      throw new UnauthorizedException('Fallo la verificación de Google');
+      throw new UnauthorizedException('Google token verification failed');
     }
   }
 
@@ -35,7 +35,7 @@ export class AuthService {
     
     const email = payload.email;
     if (!email) {
-      throw new UnauthorizedException('No se recibió el email de Google');
+      throw new UnauthorizedException('Google email not found in payload');
     }
 
     // Find or create user in our Postgres database
