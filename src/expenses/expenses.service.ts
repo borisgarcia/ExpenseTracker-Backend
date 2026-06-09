@@ -22,8 +22,8 @@ export class ExpensesService {
     });
   }
 
-  async create(userId: string, data: { amount: number; description?: string; categoryId: string; date?: string }) {
-    const { amount, description, categoryId, date } = data;
+  async create(userId: string, data: { amount: number; description?: string; categoryId: string; date?: string; paymentMethod?: string }) {
+    const { amount, description, categoryId, date, paymentMethod } = data;
 
     if (amount <= 0) {
       throw new BadRequestException('Expense amount must be greater than 0');
@@ -52,6 +52,7 @@ export class ExpensesService {
         date: parsedDate,
         userId,
         categoryId,
+        paymentMethod: paymentMethod || 'Cash',
       },
       include: {
         category: {
@@ -67,9 +68,9 @@ export class ExpensesService {
   async update(
     userId: string,
     id: string,
-    data: { amount?: number; description?: string; categoryId?: string; date?: string },
+    data: { amount?: number; description?: string; categoryId?: string; date?: string; paymentMethod?: string },
   ) {
-    const { amount, description, categoryId, date } = data;
+    const { amount, description, categoryId, date, paymentMethod } = data;
 
     const expense = await this.prisma.expense.findUnique({
       where: { id },
@@ -114,6 +115,10 @@ export class ExpensesService {
 
     if (date !== undefined) {
       updateData.date = new Date(date);
+    }
+
+    if (paymentMethod !== undefined) {
+      updateData.paymentMethod = paymentMethod;
     }
 
     return this.prisma.expense.update({
