@@ -12,16 +12,17 @@ datasource db {
 }
 
 model User {
-  id            String     @id @default(uuid())
-  email         String     @unique
-  password      String
-  name          String?
-  monthlyBudget Float      @default(1500)
-  currency      String     @default("USD")
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
-  expenses      Expense[]
-  categories    Category[]
+  id             String          @id @default(uuid())
+  email          String          @unique
+  password       String
+  name           String?
+  monthlyBudget  Float           @default(1500)
+  currency       String          @default("USD")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  expenses       Expense[]
+  categories     Category[]
+  paymentMethods PaymentMethod[]
 }
 
 model Category {
@@ -36,17 +37,41 @@ model Category {
   @@unique([name, userId])
 }
 
+model PaymentMethod {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // type: "CASH" | "CREDIT_CARD" | "DEBIT_CARD" | "BANK_ACCOUNT"
+  type        String    @default("CASH")
+  label       String    // Human-readable display name, e.g. "Visa ···1234"
+  bank        String?   // e.g. "BBVA", "BAC", "Banpais"
+  network     String?   // "VISA" | "MASTERCARD" | "AMEX" | "DISCOVER" | "OTHER"
+  lastFour    String?   // Last 4 digits of card
+  creditLimit Float?    // Only for CREDIT_CARD
+  cutoffDay   Int?      // Day of month for billing cycle (1-31), only CREDIT_CARD
+  color       String?   // Hex color for UI card
+  isDefault   Boolean   @default(false)
+  isArchived  Boolean   @default(false)
+  expenses    Expense[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
 model Expense {
-  id            String   @id @default(uuid())
-  amount        Float
-  description   String?
-  paymentMethod String   @default("Cash")
-  currency      String   @default("USD")
-  date          DateTime @default(now())
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  categoryId    String
-  category      Category @relation(fields: [categoryId], references: [id])
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              String         @id @default(uuid())
+  amount          Float
+  description     String?
+  // Legacy string field kept for backwards compatibility
+  paymentMethod   String         @default("Cash")
+  // New relation to PaymentMethod entity
+  paymentMethodId String?
+  paymentMethodRef PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  currency        String         @default("USD")
+  date            DateTime       @default(now())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId      String
+  category        Category       @relation(fields: [categoryId], references: [id])
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 }

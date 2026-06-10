@@ -5,44 +5,58 @@ import { PrismaService } from '../prisma/prisma.service';
 export class ExpensesService {
   constructor(private prisma: PrismaService) {}
 
+  private get includeRelations() {
+    return {
+      category: { select: { id: true, name: true } },
+      paymentMethodRef: {
+        select: {
+          id: true, type: true, label: true, bank: true,
+          network: true, lastFour: true, color: true,
+        },
+      },
+    };
+  }
+
   async findAll(userId: string) {
     return this.prisma.expense.findMany({
       where: { userId },
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-      orderBy: {
-        date: 'desc',
-      },
+      include: this.includeRelations,
+      orderBy: { date: 'desc' },
     });
   }
 
-  async create(userId: string, data: { amount: number; description?: string; categoryId: string; date?: string; paymentMethod?: string; currency?: string }) {
-    const { amount, description, categoryId, date, paymentMethod, currency } = data;
+  async create(
+    userId: string,
+    data: {
+      amount: number;
+      description?: string;
+      categoryId: string;
+      date?: string;
+      paymentMethod?: string;
+      paymentMethodId?: string;
+      currency?: string;
+    },
+  ) {
+    const { amount, description, categoryId, date, paymentMethod, paymentMethodId, currency } = data;
 
     if (amount <= 0) {
       throw new BadRequestException('Expense amount must be greater than 0');
     }
 
-    // Verify category exists and is either global (userId is null) or belongs to the user
-    const category = await this.prisma.category.findUnique({
-      where: { id: categoryId },
-    });
-
-    if (!category) {
-      throw new NotFoundException('Category not found');
-    }
-
+    const category = await this.prisma.category.findUnique({ where: { id: categoryId } });
+    if (!category) throw new NotFoundException('Category not found');
     if (category.userId && category.userId !== userId) {
       throw new ForbiddenException('You do not have access to this category');
     }
 
-    // Convert date string to Date object or default to current date
+    // Resolve paymentMethod label from relation if paymentMethodId given
+    let resolvedLabel = paymentMethod || 'Cash';
+    if (paymentMethodId) {
+      const pm = await this.prisma.paymentMethod.findUnique({ where: { id: paymentMethodId } });
+      if (!pm || pm.userId !== userId) throw new NotFoundException('Payment method not found');
+      resolvedLabel = pm.label;
+    }
+
     const parsedDate = date ? new Date(date) : new Date();
 
     return this.prisma.expense.create({
@@ -52,109 +66,76 @@ export class ExpensesService {
         date: parsedDate,
         userId,
         categoryId,
-        paymentMethod: paymentMethod || 'Cash',
+        paymentMethod: resolvedLabel,
+        paymentMethodId: paymentMethodId || null,
         currency: currency || 'USD',
       },
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
+      include: this.includeRelations,
     });
   }
 
   async update(
     userId: string,
     id: string,
-    data: { amount?: number; description?: string; categoryId?: string; date?: string; paymentMethod?: string; currency?: string },
+    data: {
+      amount?: number;
+      description?: string;
+      categoryId?: string;
+      date?: string;
+      paymentMethod?: string;
+      paymentMethodId?: string;
+      currency?: string;
+    },
   ) {
-    const { amount, description, categoryId, date, paymentMethod, currency } = data;
+    const { amount, description, categoryId, date, paymentMethod, paymentMethodId, currency } = data;
 
-    const expense = await this.prisma.expense.findUnique({
-      where: { id },
-    });
-
-    if (!expense) {
-      throw new NotFoundException('Expense not found');
-    }
-
-    if (expense.userId !== userId) {
-      throw new ForbiddenException('You do not have permission to edit this expense');
-    }
+    const expense = await this.prisma.expense.findUnique({ where: { id } });
+    if (!expense) throw new NotFoundException('Expense not found');
+    if (expense.userId !== userId) throw new ForbiddenException('You do not have permission to edit this expense');
 
     const updateData: any = {};
 
     if (amount !== undefined) {
-      if (amount <= 0) {
-        throw new BadRequestException('Expense amount must be greater than 0');
-      }
+      if (amount <= 0) throw new BadRequestException('Expense amount must be greater than 0');
       updateData.amount = amount;
     }
 
-    if (description !== undefined) {
-      updateData.description = description?.trim() || null;
-    }
+    if (description !== undefined) updateData.description = description?.trim() || null;
 
     if (categoryId !== undefined) {
-      const category = await this.prisma.category.findUnique({
-        where: { id: categoryId },
-      });
-
-      if (!category) {
-        throw new NotFoundException('Category not found');
-      }
-
-      if (category.userId && category.userId !== userId) {
-        throw new ForbiddenException('You do not have access to this category');
-      }
-
+      const category = await this.prisma.category.findUnique({ where: { id: categoryId } });
+      if (!category) throw new NotFoundException('Category not found');
+      if (category.userId && category.userId !== userId) throw new ForbiddenException('You do not have access to this category');
       updateData.categoryId = categoryId;
     }
 
-    if (date !== undefined) {
-      updateData.date = new Date(date);
-    }
+    if (date !== undefined) updateData.date = new Date(date);
+    if (currency !== undefined) updateData.currency = currency;
 
-    if (paymentMethod !== undefined) {
+    if (paymentMethodId !== undefined) {
+      if (paymentMethodId) {
+        const pm = await this.prisma.paymentMethod.findUnique({ where: { id: paymentMethodId } });
+        if (!pm || pm.userId !== userId) throw new NotFoundException('Payment method not found');
+        updateData.paymentMethodId = paymentMethodId;
+        updateData.paymentMethod = pm.label;
+      } else {
+        updateData.paymentMethodId = null;
+      }
+    } else if (paymentMethod !== undefined) {
       updateData.paymentMethod = paymentMethod;
-    }
-
-    if (currency !== undefined) {
-      updateData.currency = currency;
     }
 
     return this.prisma.expense.update({
       where: { id },
       data: updateData,
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
+      include: this.includeRelations,
     });
   }
 
   async remove(userId: string, id: string) {
-    const expense = await this.prisma.expense.findUnique({
-      where: { id },
-    });
-
-    if (!expense) {
-      throw new NotFoundException('Expense not found');
-    }
-
-    if (expense.userId !== userId) {
-      throw new ForbiddenException('You do not have permission to delete this expense');
-    }
-
-    return this.prisma.expense.delete({
-      where: { id },
-    });
+    const expense = await this.prisma.expense.findUnique({ where: { id } });
+    if (!expense) throw new NotFoundException('Expense not found');
+    if (expense.userId !== userId) throw new ForbiddenException('You do not have permission to delete this expense');
+    return this.prisma.expense.delete({ where: { id } });
   }
 }
