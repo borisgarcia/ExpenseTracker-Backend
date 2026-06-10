@@ -17,6 +17,7 @@ model User {
   password      String
   name          String?
   monthlyBudget Float      @default(1500)
+  currency      String     @default("USD")
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
   expenses      Expense[]
@@ -40,6 +41,7 @@ model Expense {
   amount        Float
   description   String?
   paymentMethod String   @default("Cash")
+  currency      String   @default("USD")
   date          DateTime @default(now())
   userId        String
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)

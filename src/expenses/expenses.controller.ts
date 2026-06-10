@@ -16,7 +16,7 @@ export class ExpensesController {
   @Post()
   async createExpense(
     @GetUser('id') userId: string,
-    @Body() body: { amount: number; description?: string; categoryId: string; date?: string; paymentMethod?: string },
+    @Body() body: { amount: number; description?: string; categoryId: string; date?: string; paymentMethod?: string; currency?: string },
   ) {
     return this.expensesService.create(userId, body);
   }
@@ -25,7 +25,7 @@ export class ExpensesController {
   async updateExpense(
     @GetUser('id') userId: string,
     @Param('id') id: string,
-    @Body() body: { amount?: number; description?: string; categoryId?: string; date?: string; paymentMethod?: string },
+    @Body() body: { amount?: number; description?: string; categoryId?: string; date?: string; paymentMethod?: string; currency?: string },
   ) {
     return this.expensesService.update(userId, id, body);
   }

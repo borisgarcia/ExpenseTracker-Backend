@@ -16,8 +16,8 @@ export class UsersController {
   @Patch('me')
   async updateProfile(
     @GetUser('id') userId: string,
-    @Body('monthlyBudget') monthlyBudget: number,
+    @Body() body: { monthlyBudget?: number; currency?: string },
   ) {
-    return this.usersService.updateProfile(userId, { monthlyBudget });
+    return this.usersService.updateProfile(userId, body);
   }
 }
