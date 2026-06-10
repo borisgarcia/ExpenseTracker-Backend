@@ -16,6 +16,9 @@ export interface CreatePaymentMethodDto {
   cutoffDay?: number;
   color?: string;
   isDefault?: boolean;
+  balance?: number;
+  currency?: string;
+  linkedAccountId?: string;
 }
 
 export interface UpdatePaymentMethodDto {
@@ -27,11 +30,42 @@ export interface UpdatePaymentMethodDto {
   cutoffDay?: number;
   color?: string;
   isDefault?: boolean;
+  balance?: number;
+  currency?: string;
+  linkedAccountId?: string;
 }
 
 @Injectable()
 export class PaymentMethodsService {
   constructor(private prisma: PrismaService) {}
+
+  private readonly exchangeRates: Record<string, number> = {
+    USD: 1.0,
+    HNL: 0.0405,
+    EUR: 1.08,
+    MXN: 0.055,
+    JPY: 0.0064,
+  };
+
+  private convertAmount(val: number, from: string, to: string): number {
+    const fromRate = this.exchangeRates[from] ?? 1.0;
+    const toRate = this.exchangeRates[to] ?? 1.0;
+    return (val * fromRate) / toRate;
+  }
+
+  private get includeRelations() {
+    return {
+      linkedAccount: {
+        select: {
+          id: true,
+          type: true,
+          label: true,
+          balance: true,
+          currency: true,
+        },
+      },
+    };
+  }
 
   /**
    * Build a display label from type + network + lastFour, or use custom label.
@@ -64,6 +98,7 @@ export class PaymentMethodsService {
   async findAll(userId: string) {
     const methods = await this.prisma.paymentMethod.findMany({
       where: { userId, isArchived: false },
+      include: this.includeRelations,
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
     });
 
@@ -78,6 +113,7 @@ export class PaymentMethodsService {
   async ensureCash(userId: string) {
     const existing = await this.prisma.paymentMethod.findFirst({
       where: { userId, type: 'CASH' },
+      include: this.includeRelations,
     });
     if (existing) return existing;
 
@@ -89,7 +125,10 @@ export class PaymentMethodsService {
         type: 'CASH',
         label: 'Cash',
         isDefault: count === 0,
+        balance: 0,
+        currency: 'USD',
       },
+      include: this.includeRelations,
     });
   }
 
@@ -112,6 +151,13 @@ export class PaymentMethodsService {
 
     if (dto.cutoffDay !== undefined && (dto.cutoffDay < 1 || dto.cutoffDay > 31)) {
       throw new BadRequestException('cutoffDay must be between 1 and 31');
+    }
+
+    // Validate linkedAccountId
+    if (type === 'DEBIT_CARD' && dto.linkedAccountId) {
+      const linked = await this.prisma.paymentMethod.findUnique({ where: { id: dto.linkedAccountId } });
+      if (!linked || linked.userId !== userId) throw new NotFoundException('Linked bank account not found');
+      if (linked.type !== 'BANK_ACCOUNT') throw new BadRequestException('Linked account must be a bank account');
     }
 
     const label = this.buildLabel(dto);
@@ -140,7 +186,11 @@ export class PaymentMethodsService {
         cutoffDay: dto.cutoffDay ?? null,
         color: dto.color || null,
         isDefault: shouldBeDefault,
+        balance: dto.balance ?? 0,
+        currency: dto.currency || 'USD',
+        linkedAccountId: type === 'DEBIT_CARD' ? dto.linkedAccountId || null : null,
       },
+      include: this.includeRelations,
     });
   }
 
@@ -156,6 +206,15 @@ export class PaymentMethodsService {
 
     if (dto.cutoffDay !== undefined && (dto.cutoffDay < 1 || dto.cutoffDay > 31)) {
       throw new BadRequestException('cutoffDay must be between 1 and 31');
+    }
+
+    // Validate linkedAccountId if it's DEBIT_CARD
+    if (method.type === 'DEBIT_CARD' && dto.linkedAccountId !== undefined) {
+      if (dto.linkedAccountId) {
+        const linked = await this.prisma.paymentMethod.findUnique({ where: { id: dto.linkedAccountId } });
+        if (!linked || linked.userId !== userId) throw new NotFoundException('Linked bank account not found');
+        if (linked.type !== 'BANK_ACCOUNT') throw new BadRequestException('Linked account must be a bank account');
+      }
     }
 
     // If setting as default → clear previous default
@@ -174,12 +233,21 @@ export class PaymentMethodsService {
     if (dto.cutoffDay !== undefined) updatedData.cutoffDay = dto.cutoffDay;
     if (dto.color !== undefined) updatedData.color = dto.color;
     if (dto.isDefault !== undefined) updatedData.isDefault = dto.isDefault;
+    if (dto.balance !== undefined) updatedData.balance = dto.balance;
+    if (dto.currency !== undefined) updatedData.currency = dto.currency;
+    if (method.type === 'DEBIT_CARD' && dto.linkedAccountId !== undefined) {
+      updatedData.linkedAccountId = dto.linkedAccountId || null;
+    }
 
     // Rebuild label
     const merged = { ...method, ...dto };
     updatedData.label = this.buildLabel(merged as any, method.type);
 
-    return this.prisma.paymentMethod.update({ where: { id }, data: updatedData });
+    return this.prisma.paymentMethod.update({
+      where: { id },
+      data: updatedData,
+      include: this.includeRelations,
+    });
   }
 
   async remove(userId: string, id: string) {
@@ -192,6 +260,7 @@ export class PaymentMethodsService {
     const archived = await this.prisma.paymentMethod.update({
       where: { id },
       data: { isArchived: true, isDefault: false },
+      include: this.includeRelations,
     });
 
     // If it was default, promote the first remaining method
@@ -219,6 +288,49 @@ export class PaymentMethodsService {
       data: { isDefault: false },
     });
 
-    return this.prisma.paymentMethod.update({ where: { id }, data: { isDefault: true } });
+    return this.prisma.paymentMethod.update({
+      where: { id },
+      data: { isDefault: true },
+      include: this.includeRelations,
+    });
+  }
+
+  async payCard(userId: string, id: string, fromBankAccountId?: string) {
+    const card = await this.prisma.paymentMethod.findUnique({ where: { id } });
+    if (!card) throw new NotFoundException('Payment method not found');
+    if (card.userId !== userId) throw new ForbiddenException('Not your card');
+    if (card.type !== 'CREDIT_CARD') throw new BadRequestException('Only credit cards can be paid');
+
+    const usedAmount = card.balance;
+    if (usedAmount <= 0) {
+      // Just clear balance to 0 (no actual payment needed)
+      return this.prisma.paymentMethod.update({
+        where: { id },
+        data: { balance: 0 },
+        include: this.includeRelations,
+      });
+    }
+
+    if (fromBankAccountId) {
+      const bank = await this.prisma.paymentMethod.findUnique({ where: { id: fromBankAccountId } });
+      if (!bank || bank.userId !== userId) throw new NotFoundException('Source bank account not found');
+      if (bank.type !== 'BANK_ACCOUNT') throw new BadRequestException('Source account must be a bank account');
+
+      // Convert card's used balance to bank's currency
+      const convertedPayment = this.convertAmount(usedAmount, card.currency, bank.currency);
+
+      // Deduct from bank account balance
+      await this.prisma.paymentMethod.update({
+        where: { id: fromBankAccountId },
+        data: { balance: { decrement: convertedPayment } },
+      });
+    }
+
+    // Reset card balance to 0
+    return this.prisma.paymentMethod.update({
+      where: { id },
+      data: { balance: 0 },
+      include: this.includeRelations,
+    });
   }
 }

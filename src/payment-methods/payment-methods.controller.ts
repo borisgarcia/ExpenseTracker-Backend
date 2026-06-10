@@ -26,6 +26,9 @@ export class PaymentMethodsController {
       cutoffDay?: number;
       color?: string;
       isDefault?: boolean;
+      balance?: number;
+      currency?: string;
+      linkedAccountId?: string;
     },
   ) {
     return this.paymentMethodsService.create(userId, body);
@@ -44,6 +47,9 @@ export class PaymentMethodsController {
       cutoffDay?: number;
       color?: string;
       isDefault?: boolean;
+      balance?: number;
+      currency?: string;
+      linkedAccountId?: string;
     },
   ) {
     return this.paymentMethodsService.update(userId, id, body);
@@ -63,5 +69,14 @@ export class PaymentMethodsController {
     @Param('id') id: string,
   ) {
     return this.paymentMethodsService.setDefault(userId, id);
+  }
+
+  @Post(':id/pay')
+  async payCard(
+    @GetUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() body: { fromBankAccountId?: string },
+  ) {
+    return this.paymentMethodsService.payCard(userId, id, body.fromBankAccountId);
   }
 }

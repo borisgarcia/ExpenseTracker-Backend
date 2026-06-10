@@ -38,23 +38,31 @@ model Category {
 }
 
 model PaymentMethod {
-  id          String    @id @default(uuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String          @id @default(uuid())
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   // type: "CASH" | "CREDIT_CARD" | "DEBIT_CARD" | "BANK_ACCOUNT"
-  type        String    @default("CASH")
-  label       String    // Human-readable display name, e.g. "Visa ···1234"
-  bank        String?   // e.g. "BBVA", "BAC", "Banpais"
-  network     String?   // "VISA" | "MASTERCARD" | "AMEX" | "DISCOVER" | "OTHER"
-  lastFour    String?   // Last 4 digits of card
-  creditLimit Float?    // Only for CREDIT_CARD
-  cutoffDay   Int?      // Day of month for billing cycle (1-31), only CREDIT_CARD
-  color       String?   // Hex color for UI card
-  isDefault   Boolean   @default(false)
-  isArchived  Boolean   @default(false)
-  expenses    Expense[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  type            String          @default("CASH")
+  label           String          // Human-readable display name, e.g. "Visa ···1234"
+  bank            String?         // e.g. "BBVA", "BAC", "Banpais"
+  network         String?         // "VISA" | "MASTERCARD" | "AMEX" | "DISCOVER" | "OTHER"
+  lastFour        String?         // Last 4 digits of card
+  creditLimit     Float?          // Only for CREDIT_CARD
+  cutoffDay       Int?            // Day of month for billing cycle (1-31), only CREDIT_CARD
+  color           String?         // Hex color for UI card
+  isDefault       Boolean         @default(false)
+  isArchived      Boolean         @default(false)
+  
+  // New balance & link tracking
+  balance         Float           @default(0)
+  currency        String          @default("USD")
+  linkedAccountId String?
+  linkedAccount   PaymentMethod?  @relation("AccountCards", fields: [linkedAccountId], references: [id], onDelete: SetNull)
+  debitCards      PaymentMethod[] @relation("AccountCards")
+
+  expenses        Expense[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 }
 
 model Expense {
